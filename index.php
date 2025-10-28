@@ -1,5 +1,5 @@
 <?php
-// index.php - API CRUD para Catálogo de Ramos y Pedidos
+// index.php - API CRUD para Catálogo de Ramos y Pedidos con Subida de Imágenes
 require_once 'db.php';
 
 // CORS COMPLETO para Expo/React Native
@@ -15,16 +15,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
     exit();
 }
 
-// Configuración para subida de imágenes
-define('UPLOAD_DIR', 'uploads/');
-define('MAX_FILE_SIZE', 5 * 1024 * 1024); // 5MB
-define('ALLOWED_TYPES', ['image/jpeg', 'image/png', 'image/jpg', 'image/gif']);
-
-// Crear directorio de uploads si no existe
-if (!file_exists(UPLOAD_DIR)) {
-    mkdir(UPLOAD_DIR, 0777, true);
-}
-
 // Helper function
 function sendResponse($success, $data = null, $error = null, $code = null) {
     http_response_code($code ?: ($success ? 200 : 500));
@@ -37,38 +27,51 @@ function sendResponse($success, $data = null, $error = null, $code = null) {
 }
 
 // Función para subir imagen
-function uploadImage($base64Image) {
-    // Si es una URL local (desde la app), procesar como base64
-    if (strpos($base64Image, 'data:image') === 0) {
-        list($type, $data) = explode(';', $base64Image);
-        list(, $data) = explode(',', $data);
-        $data = base64_decode($data);
-        
-        // Obtener extensión
-        $extension = 'jpg';
-        if (strpos($type, 'png') !== false) $extension = 'png';
-        if (strpos($type, 'gif') !== false) $extension = 'gif';
-        if (strpos($type, 'jpeg') !== false) $extension = 'jpg';
-        
-        $filename = uniqid() . '_' . time() . '.' . $extension;
-        $filepath = UPLOAD_DIR . $filename;
-        
-        if (file_put_contents($filepath, $data)) {
-            return $filename; // Retornar solo el nombre del archivo
-        }
-    }
-    // Si ya es un nombre de archivo (en actualizaciones)
-    elseif (!empty($base64Image) && file_exists(UPLOAD_DIR . $base64Image)) {
-        return $base64Image;
+function uploadRamoImage($file) {
+    // Validar si se subió un archivo
+    if (!isset($file) || $file['error'] !== UPLOAD_ERR_OK) {
+        throw new Exception("No se pudo subir la imagen");
     }
     
-    return null;
+    // Validar tipo de archivo
+    $allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $mimeType = finfo_file($finfo, $file['tmp_name']);
+    finfo_close($finfo);
+    
+    if (!in_array($mimeType, $allowedTypes)) {
+        throw new Exception("Tipo de archivo no permitido. Solo JPG, PNG, GIF y WebP");
+    }
+    
+    // Validar tamaño (máximo 5MB)
+    if ($file['size'] > 5 * 1024 * 1024) {
+        throw new Exception("La imagen es demasiado grande (máximo 5MB)");
+    }
+    
+    // Crear directorio si no existe
+    $uploadDir = 'C:/Users/h8536/OneDrive/Escritorio/api_movil/uploads/ramos/';
+    if (!is_dir($uploadDir)) {
+        mkdir($uploadDir, 0777, true);
+    }
+    
+    // Generar nombre único
+    $extension = pathinfo($file['name'], PATHINFO_EXTENSION);
+    $fileName = 'ramo_' . time() . '_' . uniqid() . '.' . $extension;
+    $filePath = $uploadDir . $fileName;
+    
+    // Mover archivo
+    if (move_uploaded_file($file['tmp_name'], $filePath)) {
+        // Devolver la ruta relativa para la web
+        return '/uploads/ramos/' . $fileName;
+    } else {
+        throw new Exception("Error al guardar la imagen en el servidor");
+    }
 }
 
 // Función para eliminar imagen antigua
-function deleteOldImage($filename) {
-    if (!empty($filename) && file_exists(UPLOAD_DIR . $filename)) {
-        unlink(UPLOAD_DIR . $filename);
+function deleteOldImage($imagePath) {
+    if ($imagePath && file_exists($_SERVER['DOCUMENT_ROOT'] . $imagePath)) {
+        unlink($_SERVER['DOCUMENT_ROOT'] . $imagePath);
     }
 }
 
@@ -84,11 +87,6 @@ if (json_last_error() !== JSON_ERROR_NONE) {
 // También obtener datos de $_POST para compatibilidad
 if (empty($input) && !empty($_POST)) {
     $input = $_POST;
-}
-
-// Manejar uploads de archivos multipart/form-data
-if (!empty($_FILES)) {
-    $input = array_merge($input, $_POST);
 }
 
 try {
@@ -107,21 +105,31 @@ try {
         sendResponse(true, ['status' => 'API funcionando', 'timestamp' => date('Y-m-d H:i:s')]);
     }
     
+    // ========== ENDPOINT PARA SUBIR IMAGEN ==========
+    if ($path == '/upload-ramo-image' && $method == 'POST') {
+        error_log("📤 SUBIENDO IMAGEN DE RAMO...");
+        
+        try {
+            if (!isset($_FILES['imagen']) || $_FILES['imagen']['error'] !== UPLOAD_ERR_OK) {
+                sendResponse(false, null, "No se seleccionó ninguna imagen", 400);
+            }
+            
+            $imagePath = uploadRamoImage($_FILES['imagen']);
+            error_log("✅ IMAGEN SUBIDA: " . $imagePath);
+            sendResponse(true, ['image_path' => $imagePath]);
+            
+        } catch (Exception $e) {
+            error_log("❌ ERROR SUBIENDO IMAGEN: " . $e->getMessage());
+            sendResponse(false, null, $e->getMessage(), 500);
+        }
+    }
+    
     // ========== CRUD PARA RAMOS ==========
     
     // GET todos los ramos
     if ($path == '/ramos' && $method == 'GET') {
         $stmt = $pdo->query("SELECT * FROM catalogo_ramos ORDER BY id DESC");
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        // Construir URLs completas para las imágenes
-        $base_url = (isset($_SERVER['HTTPS']) ? 'https' : 'http') . '://' . $_SERVER['HTTP_HOST'] . dirname($_SERVER['PHP_SELF']);
-        foreach ($rows as &$row) {
-            if (!empty($row['imagen'])) {
-                $row['imagen_url'] = $base_url . '/' . UPLOAD_DIR . $row['imagen'];
-            }
-        }
-        
         sendResponse(true, $rows);
     }
     
@@ -133,12 +141,6 @@ try {
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         
         if ($row) {
-            // Construir URL completa para la imagen
-            $base_url = (isset($_SERVER['HTTPS']) ? 'https' : 'http') . '://' . $_SERVER['HTTP_HOST'] . dirname($_SERVER['PHP_SELF']);
-            if (!empty($row['imagen'])) {
-                $row['imagen_url'] = $base_url . '/' . UPLOAD_DIR . $row['imagen'];
-            }
-            
             sendResponse(true, $row);
         } else {
             sendResponse(false, null, "Ramo no encontrado", 404);
@@ -156,13 +158,17 @@ try {
             sendResponse(false, null, "Faltan campos requeridos: " . implode(', ', $missing), 400);
         }
         
-        // Procesar imagen
-        $imagenFilename = null;
-        if (!empty($input['imagen'])) {
-            $imagenFilename = uploadImage($input['imagen']);
-            if (!$imagenFilename) {
-                error_log("❌ Error al subir imagen");
+        // Manejar subida de imagen si existe
+        $imagenPath = '';
+        if (isset($_FILES['imagen']) && $_FILES['imagen']['error'] === UPLOAD_ERR_OK) {
+            try {
+                $imagenPath = uploadRamoImage($_FILES['imagen']);
+            } catch (Exception $e) {
+                sendResponse(false, null, "Error con la imagen: " . $e->getMessage(), 400);
             }
+        } elseif (isset($input['imagen']) && !empty($input['imagen'])) {
+            // Si es una URL base64 o URI existente
+            $imagenPath = $input['imagen'];
         }
         
         $sql = "INSERT INTO catalogo_ramos (titulo, valor, categoria, description, imagen) VALUES (?, ?, ?, ?, ?)";
@@ -179,18 +185,14 @@ try {
                 $valor,
                 $categoria,
                 $description,
-                $imagenFilename
+                $imagenPath
             ]);
             
             $nuevoId = $pdo->lastInsertId();
-            error_log("✅ Ramo creado exitosamente - ID: $nuevoId, Imagen: " . ($imagenFilename ?: 'Ninguna'));
+            error_log("✅ Ramo creado exitosamente - ID: $nuevoId");
             sendResponse(true, ['id' => $nuevoId, 'message' => 'Ramo creado exitosamente']);
             
         } catch (PDOException $e) {
-            // Si hay error, eliminar imagen subida
-            if ($imagenFilename) {
-                deleteOldImage($imagenFilename);
-            }
             error_log("❌ Error al crear ramo: " . $e->getMessage());
             sendResponse(false, null, "Error al crear ramo: " . $e->getMessage(), 500);
         }
@@ -201,27 +203,36 @@ try {
         $id = $matches[1];
         error_log("📥 PUT /ramos/$id recibido: " . json_encode($input));
         
-        // Verificar si existe
+        // Verificar si existe y obtener imagen actual
         $checkStmt = $pdo->prepare("SELECT id, imagen FROM catalogo_ramos WHERE id = ?");
         $checkStmt->execute([$id]);
-        $existingRamo = $checkStmt->fetch(PDO::FETCH_ASSOC);
+        $ramoActual = $checkStmt->fetch();
         
-        if (!$existingRamo) {
+        if (!$ramoActual) {
             sendResponse(false, null, "Ramo no encontrado", 404);
         }
         
-        // Procesar nueva imagen si se proporciona
-        $imagenFilename = $existingRamo['imagen'];
-        if (!empty($input['imagen'])) {
-            // Eliminar imagen anterior si existe
-            if (!empty($imagenFilename)) {
-                deleteOldImage($imagenFilename);
+        // Manejar subida de nueva imagen si existe
+        $nuevaImagen = $ramoActual['imagen']; // Mantener la imagen actual por defecto
+        
+        if (isset($_FILES['imagen']) && $_FILES['imagen']['error'] === UPLOAD_ERR_OK) {
+            try {
+                // Subir nueva imagen
+                $nuevaImagen = uploadRamoImage($_FILES['imagen']);
+                // Eliminar imagen anterior si existe
+                if ($ramoActual['imagen']) {
+                    deleteOldImage($ramoActual['imagen']);
+                }
+            } catch (Exception $e) {
+                sendResponse(false, null, "Error con la imagen: " . $e->getMessage(), 400);
             }
-            
-            $imagenFilename = uploadImage($input['imagen']);
-            if (!$imagenFilename) {
-                error_log("❌ Error al subir nueva imagen");
-                $imagenFilename = $existingRamo['imagen']; // Mantener la anterior
+        } elseif (isset($input['imagen'])) {
+            if (empty($input['imagen']) && $ramoActual['imagen']) {
+                // Si se envía imagen vacía, eliminar la actual
+                deleteOldImage($ramoActual['imagen']);
+                $nuevaImagen = '';
+            } elseif (!empty($input['imagen']) && $input['imagen'] !== $ramoActual['imagen']) {
+                $nuevaImagen = $input['imagen'];
             }
         }
         
@@ -240,9 +251,9 @@ try {
             }
         }
         
-        // Agregar imagen a los campos a actualizar
+        // Agregar imagen a la actualización
         $updateFields[] = "imagen = ?";
-        $params[] = $imagenFilename;
+        $params[] = $nuevaImagen;
         
         if (empty($updateFields)) {
             sendResponse(false, null, "No hay campos para actualizar", 400);
@@ -270,15 +281,15 @@ try {
         // Verificar si existe y obtener imagen
         $checkStmt = $pdo->prepare("SELECT id, imagen FROM catalogo_ramos WHERE id = ?");
         $checkStmt->execute([$id]);
-        $existingRamo = $checkStmt->fetch(PDO::FETCH_ASSOC);
+        $ramo = $checkStmt->fetch();
         
-        if (!$existingRamo) {
+        if (!$ramo) {
             sendResponse(false, null, "Ramo no encontrado", 404);
         }
         
-        // Eliminar imagen asociada
-        if (!empty($existingRamo['imagen'])) {
-            deleteOldImage($existingRamo['imagen']);
+        // Eliminar imagen si existe
+        if ($ramo['imagen']) {
+            deleteOldImage($ramo['imagen']);
         }
         
         $stmt = $pdo->prepare("DELETE FROM catalogo_ramos WHERE id = ?");
