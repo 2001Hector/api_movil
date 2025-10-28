@@ -35,6 +35,11 @@ if (json_last_error() !== JSON_ERROR_NONE) {
     $input = [];
 }
 
+// También obtener datos de $_POST para compatibilidad
+if (empty($input) && !empty($_POST)) {
+    $input = $_POST;
+}
+
 try {
     $pdo = Database::getInstance();
     
@@ -74,9 +79,11 @@ try {
         }
     }
     
-    // POST - Crear nuevo ramo
+    // POST - Crear nuevo ramo - CORREGIDO
     if ($path == '/ramos' && $method == 'POST') {
-        $required = ['titulo', 'valor', 'categoria', 'description'];
+        error_log("📥 POST /ramos recibido: " . json_encode($input));
+        
+        $required = ['titulo', 'valor', 'categoria'];
         $missing = array_diff($required, array_keys($input));
         
         if (!empty($missing)) {
@@ -86,28 +93,35 @@ try {
         $sql = "INSERT INTO catalogo_ramos (titulo, valor, categoria, description, imagen) VALUES (?, ?, ?, ?, ?)";
         $stmt = $pdo->prepare($sql);
         
-        $imagen = $input['imagen'] ?? '';
+        $titulo = trim($input['titulo']);
+        $valor = floatval($input['valor']);
+        $categoria = trim($input['categoria']);
+        $description = isset($input['description']) ? trim($input['description']) : '';
+        $imagen = isset($input['imagen']) ? trim($input['imagen']) : '';
         
         try {
             $stmt->execute([
-                $input['titulo'],
-                $input['valor'],
-                $input['categoria'],
-                $input['description'],
+                $titulo,
+                $valor,
+                $categoria,
+                $description,
                 $imagen
             ]);
             
             $nuevoId = $pdo->lastInsertId();
+            error_log("✅ Ramo creado exitosamente - ID: $nuevoId");
             sendResponse(true, ['id' => $nuevoId, 'message' => 'Ramo creado exitosamente']);
             
         } catch (PDOException $e) {
+            error_log("❌ Error al crear ramo: " . $e->getMessage());
             sendResponse(false, null, "Error al crear ramo: " . $e->getMessage(), 500);
         }
     }
     
-    // PUT - Actualizar ramo
+    // PUT - Actualizar ramo - CORREGIDO
     if (preg_match('/^\/ramos\/(\d+)$/', $path, $matches) && $method == 'PUT') {
         $id = $matches[1];
+        error_log("📥 PUT /ramos/$id recibido: " . json_encode($input));
         
         // Verificar si existe
         $checkStmt = $pdo->prepare("SELECT id FROM catalogo_ramos WHERE id = ?");
@@ -124,7 +138,11 @@ try {
         foreach ($allowedFields as $field) {
             if (isset($input[$field])) {
                 $updateFields[] = "$field = ?";
-                $params[] = $input[$field];
+                if ($field === 'valor') {
+                    $params[] = floatval($input[$field]);
+                } else {
+                    $params[] = trim($input[$field]);
+                }
             }
         }
         
@@ -138,9 +156,11 @@ try {
         
         try {
             $stmt->execute($params);
+            error_log("✅ Ramo actualizado exitosamente - ID: $id");
             sendResponse(true, ['message' => 'Ramo actualizado exitosamente']);
             
         } catch (PDOException $e) {
+            error_log("❌ Error al actualizar ramo: " . $e->getMessage());
             sendResponse(false, null, "Error al actualizar ramo: " . $e->getMessage(), 500);
         }
     }
@@ -177,8 +197,10 @@ try {
         sendResponse(true, $rows);
     }
     
-    // POST - Crear nuevo pedido
+    // POST - Crear nuevo pedido - CORREGIDO
     if ($path == '/pedidos' && $method == 'POST') {
+        error_log("📥 POST /pedidos recibido: " . json_encode($input));
+        
         $required = ['nombre_cliente', 'direccion', 'fecha_entrega', 'valor_ramo'];
         $missing = array_diff($required, array_keys($input));
         
@@ -186,26 +208,29 @@ try {
             sendResponse(false, null, "Faltan campos requeridos: " . implode(', ', $missing), 400);
         }
         
-        $sql = "INSERT INTO pedido (nombre_cliente, direccion, fecha_entrega, valor_ramo, nombre_ramo, celular, descripcion, estado) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+        $sql = "INSERT INTO pedido (nombre_cliente, direccion, fecha_entrega, valor_ramo, nombre_ramo, celular, descripcion, estado, cantidad_pagada) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
         $stmt = $pdo->prepare($sql);
         
         try {
             $stmt->execute([
-                $input['nombre_cliente'],
-                $input['direccion'],
-                $input['fecha_entrega'],
-                $input['valor_ramo'],
-                $input['nombre_ramo'] ?? '',
-                $input['celular'] ?? '',
-                $input['descripcion'] ?? '',
-                $input['estado'] ?? 'En proceso'
+                trim($input['nombre_cliente']),
+                trim($input['direccion']),
+                trim($input['fecha_entrega']),
+                floatval($input['valor_ramo']),
+                isset($input['nombre_ramo']) ? trim($input['nombre_ramo']) : '',
+                isset($input['celular']) ? trim($input['celular']) : '',
+                isset($input['descripcion']) ? trim($input['descripcion']) : '',
+                isset($input['estado']) ? trim($input['estado']) : 'En proceso',
+                isset($input['cantidad_pagada']) ? floatval($input['cantidad_pagada']) : 0.00
             ]);
             
             $nuevoId = $pdo->lastInsertId();
+            error_log("✅ Pedido creado exitosamente - ID: $nuevoId");
             sendResponse(true, ['id' => $nuevoId, 'message' => 'Pedido creado exitosamente']);
             
         } catch (PDOException $e) {
+            error_log("❌ Error al crear pedido: " . $e->getMessage());
             sendResponse(false, null, "Error al crear pedido: " . $e->getMessage(), 500);
         }
     }
@@ -214,8 +239,10 @@ try {
     sendResponse(false, null, "Ruta no encontrada: $path", 404);
     
 } catch (PDOException $e) {
+    error_log("❌ Error de base de datos: " . $e->getMessage());
     sendResponse(false, null, "Error de base de datos: " . $e->getMessage());
 } catch (Exception $e) {
+    error_log("❌ Error interno: " . $e->getMessage());
     sendResponse(false, null, "Error interno: " . $e->getMessage());
 }
 ?>
