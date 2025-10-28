@@ -1,5 +1,5 @@
 <?php
-// index.php - API CRUD para Catálogo de Ramos
+// index.php - API CRUD para Catálogo de Ramos y Pedidos
 require_once 'db.php';
 
 // CORS COMPLETO para Expo/React Native
@@ -79,7 +79,7 @@ try {
         }
     }
     
-    // POST - Crear nuevo ramo - CORREGIDO
+    // POST - Crear nuevo ramo
     if ($path == '/ramos' && $method == 'POST') {
         error_log("📥 POST /ramos recibido: " . json_encode($input));
         
@@ -118,7 +118,7 @@ try {
         }
     }
     
-    // PUT - Actualizar ramo - CORREGIDO
+    // PUT - Actualizar ramo
     if (preg_match('/^\/ramos\/(\d+)$/', $path, $matches) && $method == 'PUT') {
         $id = $matches[1];
         error_log("📥 PUT /ramos/$id recibido: " . json_encode($input));
@@ -197,7 +197,21 @@ try {
         sendResponse(true, $rows);
     }
     
-    // POST - Crear nuevo pedido - CORREGIDO
+    // GET pedido por ID
+    if (preg_match('/^\/pedidos\/(\d+)$/', $path, $matches) && $method == 'GET') {
+        $id = $matches[1];
+        $stmt = $pdo->prepare("SELECT * FROM pedido WHERE id = ?");
+        $stmt->execute([$id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($row) {
+            sendResponse(true, $row);
+        } else {
+            sendResponse(false, null, "Pedido no encontrado", 404);
+        }
+    }
+    
+    // POST - Crear nuevo pedido
     if ($path == '/pedidos' && $method == 'POST') {
         error_log("📥 POST /pedidos recibido: " . json_encode($input));
         
@@ -232,6 +246,76 @@ try {
         } catch (PDOException $e) {
             error_log("❌ Error al crear pedido: " . $e->getMessage());
             sendResponse(false, null, "Error al crear pedido: " . $e->getMessage(), 500);
+        }
+    }
+    
+    // PUT - Actualizar pedido
+    if (preg_match('/^\/pedidos\/(\d+)$/', $path, $matches) && $method == 'PUT') {
+        $id = $matches[1];
+        error_log("📥 PUT /pedidos/$id recibido: " . json_encode($input));
+        
+        // Verificar si existe
+        $checkStmt = $pdo->prepare("SELECT id FROM pedido WHERE id = ?");
+        $checkStmt->execute([$id]);
+        
+        if (!$checkStmt->fetch()) {
+            sendResponse(false, null, "Pedido no encontrado", 404);
+        }
+        
+        $allowedFields = ['nombre_cliente', 'direccion', 'fecha_entrega', 'valor_ramo', 'nombre_ramo', 'celular', 'descripcion', 'estado', 'cantidad_pagada'];
+        $updateFields = [];
+        $params = [];
+        
+        foreach ($allowedFields as $field) {
+            if (isset($input[$field])) {
+                $updateFields[] = "$field = ?";
+                if ($field === 'valor_ramo' || $field === 'cantidad_pagada') {
+                    $params[] = floatval($input[$field]);
+                } else {
+                    $params[] = trim($input[$field]);
+                }
+            }
+        }
+        
+        if (empty($updateFields)) {
+            sendResponse(false, null, "No hay campos para actualizar", 400);
+        }
+        
+        $params[] = $id;
+        $sql = "UPDATE pedido SET " . implode(', ', $updateFields) . " WHERE id = ?";
+        $stmt = $pdo->prepare($sql);
+        
+        try {
+            $stmt->execute($params);
+            error_log("✅ Pedido actualizado exitosamente - ID: $id");
+            sendResponse(true, ['message' => 'Pedido actualizado exitosamente']);
+            
+        } catch (PDOException $e) {
+            error_log("❌ Error al actualizar pedido: " . $e->getMessage());
+            sendResponse(false, null, "Error al actualizar pedido: " . $e->getMessage(), 500);
+        }
+    }
+    
+    // DELETE - Eliminar pedido
+    if (preg_match('/^\/pedidos\/(\d+)$/', $path, $matches) && $method == 'DELETE') {
+        $id = $matches[1];
+        
+        // Verificar si existe
+        $checkStmt = $pdo->prepare("SELECT id FROM pedido WHERE id = ?");
+        $checkStmt->execute([$id]);
+        
+        if (!$checkStmt->fetch()) {
+            sendResponse(false, null, "Pedido no encontrado", 404);
+        }
+        
+        $stmt = $pdo->prepare("DELETE FROM pedido WHERE id = ?");
+        
+        try {
+            $stmt->execute([$id]);
+            sendResponse(true, ['message' => 'Pedido eliminado exitosamente']);
+            
+        } catch (PDOException $e) {
+            sendResponse(false, null, "Error al eliminar pedido: " . $e->getMessage(), 500);
         }
     }
     
