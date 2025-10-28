@@ -26,43 +26,6 @@ function sendResponse($success, $data = null, $error = null, $code = null) {
     exit;
 }
 
-// Función para subir imágenes
-function handleImageUpload() {
-    $uploadDir = __DIR__ . '/uploads/';
-    
-    // Crear directorio si no existe
-    if (!file_exists($uploadDir)) {
-        mkdir($uploadDir, 0777, true);
-    }
-    
-    if (!isset($_FILES['imagen']) || $_FILES['imagen']['error'] !== UPLOAD_ERR_OK) {
-        return ['success' => false, 'error' => 'No se recibió ninguna imagen válida'];
-    }
-    
-    $file = $_FILES['imagen'];
-    $fileName = uniqid() . '_' . basename($file['name']);
-    $filePath = $uploadDir . $fileName;
-    
-    // Validar tipo de archivo
-    $allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-    $fileType = mime_content_type($file['tmp_name']);
-    
-    if (!in_array($fileType, $allowedTypes)) {
-        return ['success' => false, 'error' => 'Tipo de archivo no permitido: ' . $fileType];
-    }
-    
-    // Mover archivo
-    if (move_uploaded_file($file['tmp_name'], $filePath)) {
-        return [
-            'success' => true, 
-            'filePath' => 'uploads/' . $fileName,
-            'fileName' => $fileName
-        ];
-    } else {
-        return ['success' => false, 'error' => 'Error al mover el archivo subido'];
-    }
-}
-
 // Obtener método HTTP
 $method = $_SERVER['REQUEST_METHOD'];
 
@@ -91,23 +54,6 @@ try {
     if ($path == '/health' || $path == '/') {
         $stmt = $pdo->query("SELECT 1 AS ok");
         sendResponse(true, ['status' => 'API funcionando', 'timestamp' => date('Y-m-d H:i:s')]);
-    }
-    
-    // ========== UPLOAD DE IMAGENES ==========
-    if ($path == '/upload' && $method == 'POST') {
-        error_log("📤 UPLOAD DE IMAGEN RECIBIDO");
-        
-        $uploadResult = handleImageUpload();
-        
-        if ($uploadResult['success']) {
-            sendResponse(true, [
-                'message' => 'Imagen subida correctamente',
-                'filePath' => $uploadResult['filePath'],
-                'fileName' => $uploadResult['fileName']
-            ]);
-        } else {
-            sendResponse(false, null, $uploadResult['error'], 400);
-        }
     }
     
     // ========== CRUD PARA RAMOS ==========
@@ -224,17 +170,11 @@ try {
         $id = $matches[1];
         
         // Verificar si existe
-        $checkStmt = $pdo->prepare("SELECT id, imagen FROM catalogo_ramos WHERE id = ?");
+        $checkStmt = $pdo->prepare("SELECT id FROM catalogo_ramos WHERE id = ?");
         $checkStmt->execute([$id]);
-        $ramo = $checkStmt->fetch(PDO::FETCH_ASSOC);
         
-        if (!$ramo) {
+        if (!$checkStmt->fetch()) {
             sendResponse(false, null, "Ramo no encontrado", 404);
-        }
-        
-        // Eliminar imagen del servidor si existe
-        if (!empty($ramo['imagen']) && file_exists(__DIR__ . '/' . $ramo['imagen'])) {
-            unlink(__DIR__ . '/' . $ramo['imagen']);
         }
         
         $stmt = $pdo->prepare("DELETE FROM catalogo_ramos WHERE id = ?");
