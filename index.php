@@ -49,7 +49,7 @@ function uploadRamoImage($file) {
     }
     
     // Crear directorio si no existe
-    $uploadDir = 'C:/Users/h8536/OneDrive/Escritorio/api_movil/uploads/ramos/';
+    $uploadDir = 'uploads/ramos/';
     if (!is_dir($uploadDir)) {
         mkdir($uploadDir, 0777, true);
     }
