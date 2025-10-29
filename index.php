@@ -64,7 +64,7 @@ function uploadRamoImage($file) {
         // Devolver la ruta relativa para la web
         return '/uploads/ramos/' . $fileName;
     } else {
-        throw new Exception("Error al guardar la imagen en el servidor");
+        throw new Exception("Error al guardar la imagen en el servidorrrrr");
     }
 }
 
